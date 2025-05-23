@@ -1,17 +1,24 @@
+// PARAMETERS
 param name string
 param location string = resourceGroup().location
 param tags object = {}
-
 param appUser string = 'appUser'
 param databaseName string
 param keyVaultName string
 param sqlAdmin string = 'sqlAdmin'
 param connectionStringKey string = 'AZURE-SQL-CONNECTION-STRING'
-
 @secure()
 param sqlAdminPassword string
 @secure()
 param appUserPassword string
+
+// VARIABLES
+var connectionString = 'Server=${sqlServer.properties.fullyQualifiedDomainName}; Database=${sqlServer::database.name}; User=${appUser}'
+
+// RESOURCES
+resource keyVault 'Microsoft.KeyVault/vaults@2022-07-01' existing = {
+  name: keyVaultName
+}
 
 resource sqlServer 'Microsoft.Sql/servers@2022-05-01-preview' = {
   name: name
@@ -24,18 +31,13 @@ resource sqlServer 'Microsoft.Sql/servers@2022-05-01-preview' = {
     administratorLogin: sqlAdmin
     administratorLoginPassword: sqlAdminPassword
   }
-
   resource database 'databases' = {
     name: databaseName
     location: location
   }
-
   resource firewall 'firewallRules' = {
     name: 'Azure Services'
     properties: {
-      // Allow all clients
-      // Note: range [0.0.0.0-0.0.0.0] means "allow all Azure-hosted clients only".
-      // This is not sufficient, because we also want to allow direct access from developer machine, for debugging purposes.
       startIpAddress: '0.0.0.1'
       endIpAddress: '255.255.255.254'
     }
@@ -48,8 +50,8 @@ resource sqlDeploymentScript 'Microsoft.Resources/deploymentScripts@2020-10-01' 
   kind: 'AzureCLI'
   properties: {
     azCliVersion: '2.37.0'
-    retentionInterval: 'PT1H' // Retain the script resource for 1 hour after it ends running
-    timeout: 'PT5M' // Five minutes
+    retentionInterval: 'PT1H'
+    timeout: 'PT5M'
     cleanupPreference: 'OnSuccess'
     environmentVariables: [
       {
@@ -77,11 +79,9 @@ resource sqlDeploymentScript 'Microsoft.Resources/deploymentScripts@2020-10-01' 
         value: sqlAdmin
       }
     ]
-
     scriptContent: '''
 wget https://github.com/microsoft/go-sqlcmd/releases/download/v0.8.1/sqlcmd-v0.8.1-linux-x64.tar.bz2
 tar x -f sqlcmd-v0.8.1-linux-x64.tar.bz2 -C .
-
 cat <<SCRIPT_END > ./initDb.sql
 drop user ${APPUSERNAME}
 go
@@ -90,7 +90,6 @@ go
 alter role db_owner add member ${APPUSERNAME}
 go
 SCRIPT_END
-
 ./sqlcmd -S ${DBSERVER} -d ${DBNAME} -U ${SQLADMIN} -i ./initDb.sql
     '''
   }
@@ -120,10 +119,6 @@ resource sqlAzureConnectionStringSercret 'Microsoft.KeyVault/vaults/secrets@2022
   }
 }
 
-resource keyVault 'Microsoft.KeyVault/vaults@2022-07-01' existing = {
-  name: keyVaultName
-}
-
-var connectionString = 'Server=${sqlServer.properties.fullyQualifiedDomainName}; Database=${sqlServer::database.name}; User=${appUser}'
+// OUTPUTS
 output connectionStringKey string = connectionStringKey
 output databaseName string = sqlServer::database.name
